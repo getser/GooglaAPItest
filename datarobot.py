@@ -1,6 +1,7 @@
 from __future__ import print_function
 import httplib2
 import os
+import json
 
 from apiclient import discovery
 from oauth2client import client
@@ -32,8 +33,7 @@ def get_credentials():
     credential_dir = os.path.join(home_dir, '.credentials')
     if not os.path.exists(credential_dir):
         os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir,
-                                   'googe_sheets_api_creds.json')
+    credential_path = os.path.join(credential_dir, 'googe_sheets_api_creds.json')
 
     store = Storage(credential_path)
     credentials = store.get()
@@ -49,6 +49,14 @@ def get_credentials():
 
 
 def str_to_float_list_values(data):
+    """data: list().
+
+    Tries to convert 'data' elements to float.
+    If can't convert - leaves element unchanged.
+
+    Returns:
+        List (of the same length as 'data') of floats where were possible to convert.
+    """
     result = []
     for val in data:
         try:
@@ -60,11 +68,21 @@ def str_to_float_list_values(data):
     return result
 
 
-def moving_averages(dataset, interval, placeholder):
+def moving_averages(data, interval, placeholder):
+    """data: list() - data using for calculations,
+    interval: int() service value for moving average calculating,
+    placeholder: any type to fill places if it is unable to calculate result.
+
+    If possible, calculates moving averages using 'interval' and 'data',
+    else fills place with placeholder.
+
+    Returns:
+        List of results and placeholders of the same length as 'data'.
+    """
     uncounted = placeholder
     result = []
 
-    for idx in range(len(dataset)):
+    for idx in range(len(data)):
         if idx < interval - 1:
             res = uncounted
 
@@ -73,9 +91,9 @@ def moving_averages(dataset, interval, placeholder):
                 previous_res = result[idx - 1]
 
                 if previous_res == uncounted:
-                    res = sum(dataset[idx - (interval - 1): idx + 1]) / float(interval)
+                    res = sum(data[idx - (interval - 1): idx + 1]) / float(interval)
                 else:
-                    res = previous_res + (dataset[idx] - dataset[idx - interval]) / interval
+                    res = previous_res + (data[idx] - data[idx - interval]) / interval
 
             except ValueError:
                 res = uncounted
@@ -87,21 +105,44 @@ def moving_averages(dataset, interval, placeholder):
     return result
 
 
+def load_settings(settingsfile):
+    """
+    settingsfile - string() filename
+    Returns:
+        dict() settings loaded from file.
+    """
+
+    with open(settingsfile) as json_settings_file:  # 'settings.json'
+        settings = json.loads(json_settings_file.read())
+    return settings
+
+
 def main():
     credentials = get_credentials()
     http_auth = credentials.authorize(httplib2.Http())
     discovery_url = ('https://sheets.googleapis.com/$discovery/rest?' 'version=v4')
 
-    spreadsheet_id = '1oiLRvnAbHnDDRBgkdR3e9mPnlANSWUEx37Aqe1iFk0c'
-    api_key = 'AIzaSyA6CmM-SaYp62aGm9TpvZwbTvJ7siLIUhY'
-    moving_average_interval = 3
-    uncounted = 'N/A'
-    work_range = {
-        'start_col': 'B', 'start_row': '2',
-        'end_col': 'I', 'end_row': ''
-    }
-    header_row = 0
-    update_range = 'J2:J14'
+    settings = load_settings('settings.json')
+
+    spreadsheet_id = settings['spreadsheet_id']
+    api_key = settings['api_key']
+    moving_average_interval = settings['moving_average_interval']
+    uncounted = settings['uncounted']
+    work_range = settings['work_range']
+    header_row = settings['header_row']
+    update_range = settings['update_range']
+
+
+    # spreadsheet_id = '1oiLRvnAbHnDDRBgkdR3e9mPnlANSWUEx37Aqe1iFk0c'
+    # api_key = 'AIzaSyA6CmM-SaYp62aGm9TpvZwbTvJ7siLIUhY'
+    # moving_average_interval = 3
+    # uncounted = 'N/A'
+    # work_range = {
+    #     'start_col': 'B', 'start_row': '2',
+    #     'end_col': 'I', 'end_row': ''
+    # }
+    # header_row = 0
+    # update_range = 'J2:J14'
 
     service = discovery.build('sheets', 'v4', http=http_auth, discoveryServiceUrl=discovery_url, developerKey=api_key)
     spreadsheet_data = service.spreadsheets().values()
@@ -120,27 +161,19 @@ def main():
         source_column_index = header.index('Visitors')
         # source_column_string = chr(ord(work_range['start_col']) + source_column_index)
 
-    filling_column_relative, filling_start_row, head = (len(header), 0, ['Moving Average']) if \
-                                                                            'Moving Average' not in header else \
-                                                                            (header.index('Moving Average'), 1, [])
+    filling_column_relative, filling_start_row, head = (len(header), 0, ['Moving average']) if \
+                                            'Moving average' not in header else (header.index('Moving average'), 1, [])
     # filling_column_string = chr(ord(work_range['start_col']) + filling_column_relative)
 
     if not current_data:
         print('No data found.')
     else:
-        print(current_data)
-
         dataset_strings = [row[source_column_index] for row in current_data]
         dataset_floats = str_to_float_list_values(dataset_strings)
         data_to_fill = head + moving_averages(dataset_floats, moving_average_interval, uncounted)
         value_range_body = {"values": [[x] for x in data_to_fill]}
-        # print(data_to_fill)
         spreadsheet_data.update(spreadsheetId=spreadsheet_id, range=update_range,
                                 valueInputOption='USER_ENTERED', body=value_range_body).execute()
-    # request = spreadsheet_data.update(spreadsheetId=spreadsheet_id, range=update_range,
-    #                                   valueInputOption='USER_ENTERED', body=data_to_fill)
-    # response = request.execute()
-    # print(response)
 
 if __name__ == '__main__':
     main()
