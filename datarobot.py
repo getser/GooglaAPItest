@@ -112,63 +112,62 @@ def load_settings(settingsfile):
         dict() settings loaded from file.
     """
 
-    with open(settingsfile) as json_settings_file:  # 'settings.json'
+    with open(settingsfile) as json_settings_file:
         settings = json.loads(json_settings_file.read())
     return settings
 
 
 def main():
-    credentials = get_credentials()
-    http_auth = credentials.authorize(httplib2.Http())
-    discovery_url = ('https://sheets.googleapis.com/$discovery/rest?' 'version=v4')
-
     settings = load_settings('settings.json')
-
     spreadsheet_id = settings['spreadsheet_id']
     api_key = settings['api_key']
     moving_average_interval = settings['moving_average_interval']
     uncounted = settings['uncounted']
     work_range = settings['work_range']
     header_row = settings['header_row']
-    update_range = settings['update_range']
 
-
-    # spreadsheet_id = '1oiLRvnAbHnDDRBgkdR3e9mPnlANSWUEx37Aqe1iFk0c'
-    # api_key = 'AIzaSyA6CmM-SaYp62aGm9TpvZwbTvJ7siLIUhY'
-    # moving_average_interval = 3
-    # uncounted = 'N/A'
-    # work_range = {
-    #     'start_col': 'B', 'start_row': '2',
-    #     'end_col': 'I', 'end_row': ''
-    # }
-    # header_row = 0
-    # update_range = 'J2:J14'
+    credentials = get_credentials()
+    http_auth = credentials.authorize(httplib2.Http())
+    discovery_url = ('https://sheets.googleapis.com/$discovery/rest?' 'version=v4')
 
     service = discovery.build('sheets', 'v4', http=http_auth, discoveryServiceUrl=discovery_url, developerKey=api_key)
     spreadsheet_data = service.spreadsheets().values()
 
-    range_string = ':'.join([''.join([work_range['start_col'], work_range['start_row']]),
-                            ''.join([work_range['end_col'], work_range['end_row']])])  # 'B2:J'
+    range_string = ''.join([work_range['start_col'], str(work_range['start_row']),
+                            ':',
+                            work_range['end_col'], str(work_range['end_row'])])  # 'B2:J'
 
     result = spreadsheet_data.get(spreadsheetId=spreadsheet_id, range=range_string).execute()
     values = result.get('values', [])
-    header = values[header_row]
+
+    try:
+        header = values[header_row]
+    except IndexError:
+        print('Wrong header row or no data present!')
+        raise IndexError
 
     if values and not ('Visitors' in header and 'Date' in header):
+        print('The required columns are not found in the header!')
         raise ValueError
     else:
         current_data = values[(header_row + 1):]
         source_column_index = header.index('Visitors')
         # source_column_string = chr(ord(work_range['start_col']) + source_column_index)
 
-    filling_column_relative, filling_start_row, head = (len(header), 0, ['Moving average']) if \
+    filling_column_relative, filling_start_row_relative, head = (len(header), 0, ['Moving average']) if \
                                             'Moving average' not in header else (header.index('Moving average'), 1, [])
-    # filling_column_string = chr(ord(work_range['start_col']) + filling_column_relative)
+
+    filling_column_string = chr(ord(work_range['start_col']) + filling_column_relative)
+    filling_start_row = work_range['start_row'] + filling_start_row_relative + header_row
+    filling_end_row = filling_start_row + len(current_data)
+    update_range = ''.join([filling_column_string, str(filling_start_row),
+                            ':',
+                            filling_column_string, str(filling_end_row)])
 
     if not current_data:
         print('No data found.')
     else:
-        dataset_strings = [row[source_column_index] for row in current_data]
+        dataset_strings = [row[source_column_index] if row else uncounted for row in current_data]
         dataset_floats = str_to_float_list_values(dataset_strings)
         data_to_fill = head + moving_averages(dataset_floats, moving_average_interval, uncounted)
         value_range_body = {"values": [[x] for x in data_to_fill]}
