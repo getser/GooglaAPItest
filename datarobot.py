@@ -19,7 +19,7 @@ def load_settings(settingsfile):
         with open(settingsfile) as json_settings_file:
             settings = json.loads(json_settings_file.read())
     except IOError:
-        print("The setting are not loaded! Check if file 'setting.json' is present in working directory.")
+        print("The setting are not loaded! Please, check if file 'setting.json' is present in working directory.")
         raise IOError
     return settings
 
@@ -28,8 +28,8 @@ def get_sheet_id_from_input():
     """
     Returns: int() sheet ID.
     """
-    input_message = """Input sheet ID (9 numbers or zero at the end of URL address \n
-of desired sheet plased after the "/edit#gid=")\nor just hit Enter to work with the first sheet\n>>>"""
+    input_message = """Input sheet ID \n(9-digit number or zero at the end of URL address of \
+desired sheet, plased after the "/edit#gid=") \nor just hit Enter to work with the first sheet.\n>>>"""
 
     sheet_id_from_input = raw_input(input_message)
 
@@ -95,9 +95,13 @@ def moving_averages(data, interval, placeholder):
         List of results and placeholders of the same length as 'data'.
     """
 
-    assert interval == int(interval)
-    assert interval > 0
-    assert interval < len(data)
+    try:
+        assert interval == int(interval)
+        assert interval > 0
+        assert interval < len(data)
+    except AssertionError:
+        interval = 5 if len(data) > 5 else len(data)
+        print('Wrong interval! Interval automatically  set to {}.'.format(interval))
 
     uncounted = placeholder
     result = []
