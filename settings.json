@@ -1,9 +1,15 @@
 {
+    "scopes": "https://www.googleapis.com/auth/spreadsheets",
+    "client_secret_file": "client_secret.json",
+    "application_name": "Google Sheets API Python DataRobot",
     "spreadsheet_id": "1oiLRvnAbHnDDRBgkdR3e9mPnlANSWUEx37Aqe1iFk0c",
     "api_key": "AIzaSyA6CmM-SaYp62aGm9TpvZwbTvJ7siLIUhY",
-    "moving_average_interval": 3,
+
+    "moving_average_interval": 4,
     "uncounted": "N/A",
-    "work_range": {"start_col": "B", "start_row": 2,
-                   "end_col": "I", "end_row": ""},
-    "header_row": 1
+
+    "sheet_name": "Sheet2",
+    "work_range": {"start_col": "A", "start_row": 1,
+                   "end_col": "Z", "end_row": ""},
+    "header_row": 3
 }

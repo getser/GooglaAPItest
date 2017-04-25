@@ -1,51 +1,44 @@
 from __future__ import print_function
 import httplib2
-import os
 import json
+import sys
 
 from apiclient import discovery
-from oauth2client import client
-from oauth2client import tools
-from oauth2client.file import Storage
 
-try:
-    import argparse
-    flags = argparse.ArgumentParser(parents=[tools.argparser]).parse_args()
-except ImportError:
-    flags = None
+from creds_manager import get_credentials
+
+# SCOPES = 'https://www.googleapis.com/auth/spreadsheets'
+# CLIENT_SECRET_FILE = 'client_secret.json'
+# APPLICATION_NAME = 'Google Sheets API Python DataRobot'
 
 
-SCOPES = 'https://www.googleapis.com/auth/spreadsheets'
-CLIENT_SECRET_FILE = 'client_secret.json'
-APPLICATION_NAME = 'Google Sheets API Python DataRobot'
+def sheet_ids_from_commandline():
+    """data: list().
 
-
-def get_credentials():
-    """Gets valid user credentials from storage.
-
-    If nothing has been stored, or if the stored credentials are invalid,
-    the OAuth2 flow is completed to obtain the new credentials.
+    Tries to get spreadsheet id and sheet id.
+    If can't get - assigns to ''. If can't convert sheet id into int() - assigns to ''.
 
     Returns:
-        Credentials, the obtained credential.
+        spreadsheet_id, sheet_id.
     """
-    home_dir = os.path.expanduser('~')
-    credential_dir = os.path.join(home_dir, '.credentials')
-    if not os.path.exists(credential_dir):
-        os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir, 'googe_sheets_api_creds.json')
 
-    store = Storage(credential_path)
-    credentials = store.get()
-    if not credentials or credentials.invalid:
-        flow = client.flow_from_clientsecrets(CLIENT_SECRET_FILE, SCOPES)
-        flow.user_agent = APPLICATION_NAME
-        if flags:
-            credentials = tools.run_flow(flow, store, flags)
-        else:  # Needed only for compatibility with Python 2.6
-            credentials = tools.run(flow, store)
-        print('Storing credentials to ' + credential_path)
-    return credentials
+    command_line_argv = sys.argv
+    id_from_argv = command_line_argv[1] if len(command_line_argv) > 1 else ''
+    ids_divider = '/edit#gid='
+
+    if ids_divider in id_from_argv:
+        divide_index = id_from_argv.index(ids_divider)
+        spreadsheet_id, sheet_id = id_from_argv[:divide_index], id_from_argv[divide_index:]
+        try:
+            sheet_id = int(sheet_id)
+        except ValueError:
+            print('Wrong sheet id input.')
+            sheet_id = ''
+
+    else:
+        spreadsheet_id, sheet_id = id_from_argv, ''
+
+    return spreadsheet_id, sheet_id
 
 
 def str_to_float_list_values(data):
@@ -68,9 +61,21 @@ def str_to_float_list_values(data):
     return result
 
 
+def load_settings(settingsfile):
+    """
+    settingsfile - string() filename
+    Returns:
+        dict() settings loaded from file.
+    """
+
+    with open(settingsfile) as json_settings_file:
+        settings = json.loads(json_settings_file.read())
+    return settings
+
+
 def moving_averages(data, interval, placeholder):
     """data: list() - data using for calculations,
-    interval: int() service value for moving average calculating,
+    interval: int() >0 service value for moving average calculating,
     placeholder: any type to fill places if it is unable to calculate result.
 
     If possible, calculates moving averages using 'interval' and 'data',
@@ -79,6 +84,11 @@ def moving_averages(data, interval, placeholder):
     Returns:
         List of results and placeholders of the same length as 'data'.
     """
+
+    assert interval == int(interval)
+    assert interval > 0
+    assert interval < len(data)
+
     uncounted = placeholder
     result = []
 
@@ -105,43 +115,57 @@ def moving_averages(data, interval, placeholder):
     return result
 
 
-def load_settings(settingsfile):
-    """
-    settingsfile - string() filename
-    Returns:
-        dict() settings loaded from file.
-    """
-
-    with open(settingsfile) as json_settings_file:
-        settings = json.loads(json_settings_file.read())
-    return settings
-
-
 def main():
-    settings = load_settings('settings.json')
-    spreadsheet_id = settings['spreadsheet_id']
-    api_key = settings['api_key']
-    moving_average_interval = settings['moving_average_interval']
-    uncounted = settings['uncounted']
-    work_range = settings['work_range']
-    header_row = settings['header_row']
+    spreadsheet_id_from_argv, sheet_id_from_argv = sheet_ids_from_commandline()
 
-    credentials = get_credentials()
+    settings = load_settings('settings.json')
+
+    scopes = settings['scopes']
+    client_secret_file = settings['client_secret_file']
+    application_name = settings['application_name']
+    api_key = settings['api_key']
+    spreadsheet_id = settings['spreadsheet_id'] if not spreadsheet_id_from_argv else spreadsheet_id_from_argv
+    moving_average_interval = settings['moving_average_interval']
+    uncounted = settings['uncounted']  # used to substitute result data if it is unable to calculate the result
+    sheet_name_from_settings = settings.get('sheet_name')  # is optional, if needed to work with any sheet except the first one
+    # work_range = settings['work_range']
+    # header_row = settings['header_row']
+
+    credentials = get_credentials(client_secret_file, application_name, scopes)
     http_auth = credentials.authorize(httplib2.Http())
-    discovery_url = ('https://sheets.googleapis.com/$discovery/rest?' 'version=v4')
+    discovery_url = ('https://sheets.googleapis.com/$discovery/rest?version=v4')
 
     service = discovery.build('sheets', 'v4', http=http_auth, discoveryServiceUrl=discovery_url, developerKey=api_key)
+
+    spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+
+    if sheet_id_from_argv:
+        for sheet in spreadsheet['sheets']:
+            if sheet['merges'][0].get('sheetId') == sheet_id_from_argv:
+                sheet_name_from_argv = sheet['properties'].get('title', '')
+    else:
+        sheet_name_from_argv = ''
+
+    sheet_name = sheet_name_from_argv or sheet_name_from_settings or ''
+
+
+
+
     spreadsheet_data = service.spreadsheets().values()
 
-    range_string = ''.join([work_range['start_col'], str(work_range['start_row']),
+    source_range = ''.join([work_range['start_col'], str(work_range['start_row']),
                             ':',
                             work_range['end_col'], str(work_range['end_row'])])  # 'B2:J'
 
-    result = spreadsheet_data.get(spreadsheetId=spreadsheet_id, range=range_string).execute()
+    if sheet_name:
+        source_range = sheet_name + '!' + source_range
+
+    result = spreadsheet_data.get(spreadsheetId=spreadsheet_id, range=source_range).execute()
     values = result.get('values', [])
 
     try:
-        header = values[header_row]
+        header_index = header_row - 1
+        header = values[header_index]
     except IndexError:
         print('Wrong header row or no data present!')
         raise IndexError
@@ -154,8 +178,8 @@ def main():
         source_column_index = header.index('Visitors')
         # source_column_string = chr(ord(work_range['start_col']) + source_column_index)
 
-    filling_column_relative, filling_start_row_relative, head = (len(header), 0, ['Moving average']) if \
-                                            'Moving average' not in header else (header.index('Moving average'), 1, [])
+    filling_column_relative, filling_start_row_relative, head = (len(header), 0, ['Moving Average']) if \
+                                            'Moving Average' not in header else (header.index('Moving Average'), 1, [])
 
     filling_column_string = chr(ord(work_range['start_col']) + filling_column_relative)
     filling_start_row = work_range['start_row'] + filling_start_row_relative + header_row
@@ -163,6 +187,8 @@ def main():
     update_range = ''.join([filling_column_string, str(filling_start_row),
                             ':',
                             filling_column_string, str(filling_end_row)])
+    if sheet_name:
+        update_range = sheet_name + '!' + update_range
 
     if not current_data:
         print('No data found.')
