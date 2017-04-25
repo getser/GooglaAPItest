@@ -6,6 +6,13 @@ class TestDatarobot(unittest.TestCase):
     def setUp(self):
         self.maxDiff = None
 
+    def test_get_sheet_id_from_input(self):
+        res = datarobot.get_sheet_id_from_input()
+        expected = 123456789
+
+        self.assertEqual(res, expected)
+
+
     def test_str_to_float_list_values(self):
         lst = [1, '2', "3.5", 'abc', '7,8']
         res = datarobot.str_to_float_list_values(lst)
@@ -30,18 +37,13 @@ class TestDatarobot(unittest.TestCase):
 
     def test_load_settings(self):
         settings = datarobot.load_settings('settings.json')
-        expected = {
-                "scopes": "https://www.googleapis.com/auth/spreadsheets",
-                "client_secret_file": "client_secret.json",
-                "application_name": "Google Sheets API Python DataRobot",
-                "spreadsheet_id": "1oiLRvnAbHnDDRBgkdR3e9mPnlANSWUEx37Aqe1iFk0c",
-                "api_key": "AIzaSyA6CmM-SaYp62aGm9TpvZwbTvJ7siLIUhY",
-                "moving_average_interval": 3,
-                "uncounted": "N/A",
-                "work_range": {"start_col": "B", "start_row": 2,
-                               "end_col": "I", "end_row": ""},
-                "header_row": 1
-                    }
+        expected = {u'spreadsheet_id': u'1oiLRvnAbHnDDRBgkdR3e9mPnlANSWUEx37Aqe1iFk0c',
+                    u'scopes': u'https://www.googleapis.com/auth/spreadsheets',
+                    u'moving_average_interval': 4,
+                    u'uncounted': u'N/A',
+                    u'client_secret_file': u'client_secret.json',
+                    u'application_name': u'Google Sheets API Python DataRobot',
+                    u'api_key': u'AIzaSyA6CmM-SaYp62aGm9TpvZwbTvJ7siLIUhY'}
         self.assertEqual(settings, expected)
 
 

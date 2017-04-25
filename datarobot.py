@@ -12,33 +12,56 @@ from creds_manager import get_credentials
 # APPLICATION_NAME = 'Google Sheets API Python DataRobot'
 
 
-def sheet_ids_from_commandline():
-    """data: list().
-
-    Tries to get spreadsheet id and sheet id.
-    If can't get - assigns to ''. If can't convert sheet id into int() - assigns to ''.
+def load_settings(settingsfile):
+    """
+    settingsfile - string() filename
 
     Returns:
-        spreadsheet_id, sheet_id.
+        dict() settings loaded from file.
     """
 
-    command_line_argv = sys.argv
-    id_from_argv = command_line_argv[1] if len(command_line_argv) > 1 else ''
-    ids_divider = '/edit#gid='
+    with open(settingsfile) as json_settings_file:
+        settings = json.loads(json_settings_file.read())
+    return settings
 
-    if ids_divider in id_from_argv:
-        divide_index = id_from_argv.index(ids_divider)
-        spreadsheet_id, sheet_id = id_from_argv[:divide_index], id_from_argv[divide_index:]
+
+def get_sheet_id_from_input():
+    """
+    Returns: int() sheet ID.
+    """
+    input_message = """Input sheet ID (9 numbers or zero at the end of URL address \n
+of desired sheet plased after the "/edit#gid=")\nor just hit Enter to work with the first sheet\n>>>"""
+
+    sheet_id_from_input = raw_input(input_message)
+
+    while sheet_id_from_input:
+        if len(sheet_id_from_input) != 9 and sheet_id_from_input != '0':
+            print("Wrong value entered!")
+            sheet_id_from_input = raw_input(input_message)
+            continue
+
         try:
-            sheet_id = int(sheet_id)
+            sheet_id = int(sheet_id_from_input)
+            return sheet_id
+
         except ValueError:
-            print('Wrong sheet id input.')
-            sheet_id = ''
+            print("Wrong value entered!")
+            sheet_id_from_input = raw_input(input_message)
 
     else:
-        spreadsheet_id, sheet_id = id_from_argv, ''
+        sheet_id = 0
 
-    return spreadsheet_id, sheet_id
+    return sheet_id
+
+
+def column_as_string_from_number(num):
+    """
+    num: int() - number of column in a sheet
+
+    Returns:
+        Column name string as 'A' or 'D' or 'AF'.
+    """
+    return (chr(ord('A') + (num / 26) - 1) if num > 26 else '') + chr(ord('A') + (num - 1) % 26)
 
 
 def str_to_float_list_values(data):
@@ -59,18 +82,6 @@ def str_to_float_list_values(data):
 
         result.append(res)
     return result
-
-
-def load_settings(settingsfile):
-    """
-    settingsfile - string() filename
-    Returns:
-        dict() settings loaded from file.
-    """
-
-    with open(settingsfile) as json_settings_file:
-        settings = json.loads(json_settings_file.read())
-    return settings
 
 
 def moving_averages(data, interval, placeholder):
@@ -116,79 +127,77 @@ def moving_averages(data, interval, placeholder):
 
 
 def main():
-    spreadsheet_id_from_argv, sheet_id_from_argv = sheet_ids_from_commandline()
-
     settings = load_settings('settings.json')
 
     scopes = settings['scopes']
     client_secret_file = settings['client_secret_file']
     application_name = settings['application_name']
     api_key = settings['api_key']
-    spreadsheet_id = settings['spreadsheet_id'] if not spreadsheet_id_from_argv else spreadsheet_id_from_argv
-    moving_average_interval = settings['moving_average_interval']
+
+    spreadsheet_id = settings['spreadsheet_id']
+
+    moving_average_interval = settings['moving_average_interval']  # SMA window
     uncounted = settings['uncounted']  # used to substitute result data if it is unable to calculate the result
-    sheet_name_from_settings = settings.get('sheet_name')  # is optional, if needed to work with any sheet except the first one
-    # work_range = settings['work_range']
-    # header_row = settings['header_row']
 
     credentials = get_credentials(client_secret_file, application_name, scopes)
     http_auth = credentials.authorize(httplib2.Http())
-    discovery_url = ('https://sheets.googleapis.com/$discovery/rest?version=v4')
+    discovery_url = 'https://sheets.googleapis.com/$discovery/rest?version=v4'
 
     service = discovery.build('sheets', 'v4', http=http_auth, discoveryServiceUrl=discovery_url, developerKey=api_key)
-
     spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
 
-    if sheet_id_from_argv:
-        for sheet in spreadsheet['sheets']:
-            if sheet['merges'][0].get('sheetId') == sheet_id_from_argv:
-                sheet_name_from_argv = sheet['properties'].get('title', '')
-    else:
-        sheet_name_from_argv = ''
+    sheet_id = get_sheet_id_from_input()
 
-    sheet_name = sheet_name_from_argv or sheet_name_from_settings or ''
+    for sheet in spreadsheet['sheets']:
+        if sheet.get('properties', {}).get('sheetId') == sheet_id:
+            sheet_name = sheet['properties'].get('title', '')
+            last_column = sheet.get('properties', {}).get('gridProperties', {}).get('columnCount')
+            last_row = sheet.get('properties', {}).get('gridProperties', {}).get('rowCount')
+            break
 
+    last_column_string = column_as_string_from_number(last_column)
 
-
+    work_range = {
+        'start_col': 'A',
+        'start_row': 1,
+        'end_col': last_column_string,
+        'end_row': last_row
+    }
 
     spreadsheet_data = service.spreadsheets().values()
 
-    source_range = ''.join([work_range['start_col'], str(work_range['start_row']),
-                            ':',
-                            work_range['end_col'], str(work_range['end_row'])])  # 'B2:J'
-
-    if sheet_name:
-        source_range = sheet_name + '!' + source_range
+    source_range = sheet_name + '!' + ''.join([work_range['start_col'], str(work_range['start_row']),
+                                                ':',
+                                                work_range['end_col'], str(work_range['end_row'])])  # 'A1:J'
 
     result = spreadsheet_data.get(spreadsheetId=spreadsheet_id, range=source_range).execute()
     values = result.get('values', [])
 
-    try:
-        header_index = header_row - 1
-        header = values[header_index]
-    except IndexError:
+    header_index = None
+
+    for row_idx in range(len(values)):
+        if 'Visitors' in values[row_idx] and 'Date' in values[row_idx]:
+            header_index = row_idx
+            break
+
+    if header_index is None:
         print('Wrong header row or no data present!')
         raise IndexError
-
-    if values and not ('Visitors' in header and 'Date' in header):
-        print('The required columns are not found in the header!')
-        raise ValueError
     else:
-        current_data = values[(header_row + 1):]
-        source_column_index = header.index('Visitors')
-        # source_column_string = chr(ord(work_range['start_col']) + source_column_index)
+        header = values[header_index]
+
+    current_data = values[header_index + 1:]
+    source_column_index = header.index('Visitors')
 
     filling_column_relative, filling_start_row_relative, head = (len(header), 0, ['Moving Average']) if \
                                             'Moving Average' not in header else (header.index('Moving Average'), 1, [])
 
     filling_column_string = chr(ord(work_range['start_col']) + filling_column_relative)
-    filling_start_row = work_range['start_row'] + filling_start_row_relative + header_row
+    filling_start_row = work_range['start_row'] + filling_start_row_relative + header_index
     filling_end_row = filling_start_row + len(current_data)
-    update_range = ''.join([filling_column_string, str(filling_start_row),
-                            ':',
-                            filling_column_string, str(filling_end_row)])
-    if sheet_name:
-        update_range = sheet_name + '!' + update_range
+    update_range = sheet_name + '!' + ''.join([filling_column_string, str(filling_start_row),
+                                                ':',
+                                                filling_column_string, str(filling_end_row)])
 
     if not current_data:
         print('No data found.')
