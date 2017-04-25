@@ -1,15 +1,10 @@
 from __future__ import print_function
 import httplib2
 import json
-import sys
 
 from apiclient import discovery
 
 from creds_manager import get_credentials
-
-# SCOPES = 'https://www.googleapis.com/auth/spreadsheets'
-# CLIENT_SECRET_FILE = 'client_secret.json'
-# APPLICATION_NAME = 'Google Sheets API Python DataRobot'
 
 
 def load_settings(settingsfile):
@@ -20,8 +15,12 @@ def load_settings(settingsfile):
         dict() settings loaded from file.
     """
 
-    with open(settingsfile) as json_settings_file:
-        settings = json.loads(json_settings_file.read())
+    try:
+        with open(settingsfile) as json_settings_file:
+            settings = json.loads(json_settings_file.read())
+    except IOError:
+        print("The setting are not loaded! Check if file 'setting.json' is present in working directory.")
+        raise IOError
     return settings
 
 
@@ -59,9 +58,9 @@ def column_as_string_from_number(num):
     num: int() - number of column in a sheet
 
     Returns:
-        Column name string as 'A' or 'D' or 'AF'.
+        Column name string as 'A' or 'D' or 'CF'.
     """
-    return (chr(ord('A') + (num / 26) - 1) if num > 26 else '') + chr(ord('A') + (num - 1) % 26)
+    return (chr(ord('A') + (num - 27) / 26) if num > 26 else '') + chr(ord('A') + (num - 1) % 26)
 
 
 def str_to_float_list_values(data):
